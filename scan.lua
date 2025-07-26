@@ -56,7 +56,7 @@ local playerCount = #Players:GetPlayers()
 
 -- Create Luna UI Window
 local Window = Luna:CreateWindow({
-    Name = "Movement Recorder PRO",
+    Name = "Movement Recorder",
     LoadingTitle = "Loading Recorder...",
     LoadingSubtitle = "Persistent Slot System",
     ConfigFolder = "ClimbRecorderSettings"
