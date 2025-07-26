@@ -1,195 +1,198 @@
--- Advanced Macro Recorder for Climb & Jump Tower
--- Features: Movement recording, slot system, FPS display, hatch luck boost
+-- Ultimate Egg Hatch Automation
+-- With Luck Boosting, Multi-Slot Recording, and FPS Display
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UIS = game:GetService("UserInputService")
-local Stats = game:GetService("Stats")
 
--- Player setup
-local Player = Players.LocalPlayer
-local Character = Player.Character or Player.CharacterAdded:Wait()
-local Humanoid = Character:WaitForChild("Humanoid")
-local RootPart = Character:WaitForChild("HumanoidRootPart")
+-- Load Rayfield UI
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
--- Core systems
-local Recordings = {
-    {Name = "Slot 1", Data = {}},
-    {Name = "Slot 2", Data = {}},
-    {Name = "Slot 3", Data = {}}
+-- Configuration
+local CONFIG = {
+    LuckTypes = {
+        {"Super Luck", 1.5},
+        {"Ultra Luck", 2.0},
+        {"Searat Luck", 3.0},
+        {"Rainbow Luck", 5.0} -- Immortal pet boost
+    },
+    HatchModes = {
+        "Fast Match",
+        "Triple Match", 
+        "Tented Match",
+        "AUTO HATCH",
+        "MULTI HATCH"
+    },
+    RecordSlots = 3 -- Number of save slots
 }
-local currentRecording = 1
-local isRecording = false
-local isPlaying = false
-local playSpeed = 1.0
-local hatchLuckBoost = 1.0
-local lastFPSUpdate = 0
-local currentFPS = 0
 
--- FPS counter
+-- State Variables
+local currentLuck = 1.0
+local currentHatchMode = "AUTO HATCH"
+local recordedSlots = {}
+local activeSlot = 1
+local isHatching = false
+local fps = 0
+
+-- FPS Counter
 local function updateFPS()
-    local performanceStats = Stats:FindFirstChild("PerformanceStats")
-    if performanceStats then
-        local pingStat = performanceStats:FindFirstChild("Ping")
-        if pingStat then
-            currentFPS = math.floor(1/pingStat:GetValue())
-        end
+    local frames = 0
+    local lastTick = os.clock()
+    
+    while task.wait(0.5) do
+        local currentTick = os.clock()
+        fps = math.floor(frames / (currentTick - lastTick))
+        frames = 0
+        lastTick = currentTick
     end
 end
 
--- Create optimized UI
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+coroutine.wrap(updateFPS)()
+
+-- Create Main Window
 local Window = Rayfield:CreateWindow({
-    Name = "Climb Macro PRO",
-    LoadingTitle = "Loading Premium Features...",
-    LoadingSubtitle = "FPS | Slots | Hatch Boost",
+    Name = "Egg Hatch PRO",
+    LoadingTitle = "Loading Immortal Pet System",
+    LoadingSubtitle = "With Rainbow Luck Boost",
     ConfigurationSaving = {
         Enabled = true,
-        FolderName = "ClimbMacro",
-        FileName = "Config"
+        FolderName = "EggHatchPRO",
+        FileName = "MultiSlotConfig"
     }
 })
 
--- Main tab with compact layout
-local MainTab = Window:CreateTab("Macro", 4483362458)
-local StatusDisplay = MainTab:CreateLabel("Ready | FPS: 60 | Slot: 1")
+-- Main Tab
+local MainTab = Window:CreateTab("Controls", 6034287125) -- Egg icon
+local FPSLabel = MainTab:CreateLabel("FPS: "..fps)
 
--- Recording controls in one line
-local ControlRow = MainTab:CreateSection("Controls", true)
-MainTab:CreateButton({
-    Name = "● REC",
-    Callback = function()
-        if isRecording then return end
-        Recordings[currentRecording].Data = {}
-        isRecording = true
-        local startTime = os.clock()
-        
-        RunService.Heartbeat:Connect(function()
-            if not isRecording then return end
-            table.insert(Recordings[currentRecording].Data, {
-                Position = RootPart.Position,
-                Time = os.clock() - startTime
-            })
-        end)
+-- Luck Selection (Single Row)
+local LuckDropdown = MainTab:CreateDropdown({
+    Name = "Luck Boost",
+    Options = {"Super Luck", "Ultra Luck", "Searat Luck", "Rainbow Luck (Immortal)"},
+    CurrentOption = "Super Luck",
+    Callback = function(Option)
+        for _, luck in pairs(CONFIG.LuckTypes) do
+            if luck[1] == Option then
+                currentLuck = luck[2]
+                break
+            end
+        end
     end
 })
 
-MainTab:CreateButton({
-    Name = "■ STOP",
-    Callback = function()
-        isRecording = false
+-- Hatch Mode (Single Row)
+MainTab:CreateDropdown({
+    Name = "Hatch Mode",
+    Options = CONFIG.HatchModes,
+    CurrentOption = "AUTO HATCH",
+    Callback = function(Option)
+        currentHatchMode = Option
     end
 })
 
-MainTab:CreateButton({
-    Name = "▶ PLAY",
-    Callback = function()
-        if isPlaying or #Recordings[currentRecording].Data == 0 then return end
-        isPlaying = true
-        
-        local function playLoop()
+-- Recording System
+local RecordTab = Window:CreateTab("Recording", 6034233233)
+local StatusLabel = RecordTab:CreateLabel("Status: Ready")
+
+-- Create recording slots
+for i = 1, CONFIG.RecordSlots do
+    RecordTab:CreateButton({
+        Name = "Slot "..i.." (Empty)",
+        Callback = function()
+            activeSlot = i
+            StatusLabel:Set("Selected Slot "..i)
+        end
+    })
+end
+
+-- Record/Play Controls
+RecordTab:CreateToggle({
+    Name = "Record Movements",
+    CurrentValue = false,
+    Callback = function(Value)
+        if Value then
+            recordedSlots[activeSlot] = {}
             local startTime = os.clock()
-            local index = 1
             
-            while isPlaying and index <= #Recordings[currentRecording].Data do
-                local frame = Recordings[currentRecording].Data[index]
-                local elapsed = (os.clock() - startTime) * playSpeed
-                
-                if elapsed >= frame.Time then
-                    RootPart.CFrame = CFrame.new(frame.Position)
-                    index += 1
+            local connection
+            connection = RunService.Heartbeat:Connect(function()
+                table.insert(recordedSlots[activeSlot], {
+                    Position = game:GetService("Players").LocalPlayer.Character.HumanoidRootPart.Position,
+                    Time = os.clock() - startTime
+                })
+            end)
+            
+            StatusLabel:Set("Recording Slot "..activeSlot)
+        else
+            StatusLabel:Set("Saved to Slot "..activeSlot)
+            -- Update button text
+            for _, element in pairs(RecordTab:GetChildren()) do
+                if element.Name and element.Name:find("Slot "..activeSlot) then
+                    element:Set("Slot "..activeSlot.." ("..#recordedSlots[activeSlot].." steps)")
                 end
-                RunService.Heartbeat:Wait()
             end
+        end
+    end
+})
+
+RecordTab:CreateToggle({
+    Name = "Play Recording (Loop)",
+    CurrentValue = false,
+    Callback = function(Value)
+        if Value and recordedSlots[activeSlot] then
+            StatusLabel:Set("Playing Slot "..activeSlot)
             
-            if isPlaying then playLoop() end -- Loop
-        end
-        
-        playLoop()
-    end
-})
-
-MainTab:CreateButton({
-    Name = "⏹ STOP",
-    Callback = function()
-        isPlaying = false
-    end
-})
-
--- Compact settings row
-local SettingsRow = MainTab:CreateSection("Settings", true)
-MainTab:CreateSlider({
-    Name = "SPEED",
-    Range = {0.5, 3},
-    Increment = 0.1,
-    CurrentValue = 1,
-    Callback = function(v) playSpeed = v end
-})
-
-MainTab:CreateSlider({
-    Name = "HATCH LUCK",
-    Range = {1, 5},
-    Increment = 0.1,
-    CurrentValue = 1,
-    Callback = function(v) 
-        hatchLuckBoost = v
-        if game:GetService("ReplicatedStorage"):FindFirstChild("HatchLuck") then
-            game:GetService("ReplicatedStorage").HatchLuck.Value = v
-        end
-    end
-})
-
--- Slot management
-local SlotRow = MainTab:CreateSection("Slots", true)
-local SlotDropdown = MainTab:CreateDropdown({
-    Name = "SLOT",
-    Options = {"Slot 1", "Slot 2", "Slot 3"},
-    CurrentOption = "Slot 1",
-    Callback = function(opt)
-        currentRecording = tonumber(opt:match("%d"))
-    end
-})
-
-MainTab:CreateInput({
-    Name = "RENAME",
-    PlaceholderText = "New name...",
-    Callback = function(text)
-        if text and text ~= "" then
-            Recordings[currentRecording].Name = text
-            local options = {}
-            for i,v in ipairs(Recordings) do
-                options[i] = v.Name
+            while Value and recordedSlots[activeSlot] do
+                local startTime = os.clock()
+                
+                for _, point in ipairs(recordedSlots[activeSlot]) do
+                    if not Value then break end
+                    
+                    local elapsed = os.clock() - startTime
+                    local waitTime = point.Time - elapsed
+                    
+                    if waitTime > 0 then
+                        task.wait(waitTime)
+                    end
+                    
+                    game:GetService("Players").LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(point.Position)
+                end
+                
+                task.wait(0.5) -- Small delay between loops
             end
-            SlotDropdown:UpdateOptions(options)
+        else
+            StatusLabel:Set("Stopped Playback")
         end
     end
 })
 
--- Real-time updates
+-- Hatch Automation
+local HatchTab = Window:CreateTab("Hatching", 6034233233)
+HatchTab:CreateToggle({
+    Name = "Auto Hatch",
+    CurrentValue = false,
+    Callback = function(Value)
+        isHatching = Value
+        if Value then
+            coroutine.wrap(function()
+                while isHatching do
+                    -- Replace with your game's hatch function
+                    game:GetService("ReplicatedStorage").Events.HatchEgg:FireServer(currentHatchMode, currentLuck)
+                    task.wait(0.5 * (1/currentLuck)) -- Faster with better luck
+                end
+            end)()
+        end
+    end
+})
+
+-- FPS Updater
 RunService.Heartbeat:Connect(function()
-    -- Update FPS every 0.5 seconds
-    if os.clock() - lastFPSUpdate > 0.5 then
-        updateFPS()
-        lastFPSUpdate = os.clock()
-    end
-    
-    -- Update status display
-    local status = ""
-    if isRecording then
-        status = "Recording "..#Recordings[currentRecording].Data.." frames"
-    elseif isPlaying then
-        status = "Playing"
-    else
-        status = "Ready"
-    end
-    
-    StatusDisplay:Set(string.format("%s | FPS: %d | Slot: %d | Hatch: %.1fx",
-        status, currentFPS, currentRecording, hatchLuckBoost))
+    FPSLabel:Set("FPS: "..fps)
 end)
 
 Rayfield:Notify({
-    Title = "Macro System Ready",
-    Content = "Recording slots & hatch boost active!",
+    Title = "System Ready",
+    Content = "Rainbow Luck Boost Active!",
     Duration = 5,
-    Image = "rbxassetid://4483362458"
+    Image = "rbxassetid://6034287125"
 })
