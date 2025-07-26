@@ -1,5 +1,5 @@
--- Movement Recorder PRO
--- By @hadzscript
+-- Advanced Movement Recorder for Climb & Jump Tower
+-- Credits: @hadzscript
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -13,152 +13,149 @@ local RootPart = Character:WaitForChild("HumanoidRootPart")
 -- Load Rayfield UI
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
--- Settings
-local recordings = {
-    [1] = nil, -- Slot 1
-    [2] = nil, -- Slot 2
-    [3] = nil  -- Slot 3
-}
-local currentRecording = {}
+-- Movement Recording
+local recordedSlots = {} -- Stores all recordings
+local currentSlot = 1 -- Default slot
 local isRecording = false
 local isPlaying = false
-local playSpeed = 1
-local selectedSlot = 1
+
+-- Player Count
 local playerCount = #Players:GetPlayers()
 
 -- Create UI
 local Window = Rayfield:CreateWindow({
     Name = "Movement Recorder PRO",
-    LoadingTitle = "By @hadzscript",
-    LoadingSubtitle = "Loading...",
+    LoadingTitle = "Loading Recorder...",
+    LoadingSubtitle = "By @hadzscript",
     ConfigurationSaving = {
         Enabled = true,
         FolderName = "MovementRecorder",
-        FileName = "Config"
+        FileName = "Settings"
     }
 })
 
--- Main Tab
-local MainTab = Window:CreateTab("Main", 4483362458)
+local MainTab = Window:CreateTab("Recorder", 4483362458)
 local StatusLabel = MainTab:CreateLabel("Status: Idle")
-local PlayerLabel = MainTab:CreateLabel("Players: "..playerCount)
+local PlayerLabel = MainTab:CreateLabel("Players: " .. playerCount)
 
--- Recording Section
-local RecordSection = MainTab:CreateSection("Recording")
-RecordSection:CreateToggle({
-    Name = "⏺ Record",
-    CurrentValue = false,
-    Callback = function(Value)
-        isRecording = Value
-        if Value then
-            currentRecording = {}
-            StatusLabel:Set("Status: Recording...")
-            local startTime = os.clock()
-            local conn
-            conn = RunService.Heartbeat:Connect(function()
-                if not isRecording then conn:Disconnect() return end
-                table.insert(currentRecording, {
-                    Position = RootPart.Position,
-                    Timestamp = os.clock() - startTime
-                })
-            end)
-        else
-            StatusLabel:Set("Status: Recorded ("..#currentRecording.." frames)")
-        end
+-- Slot Selection Dropdown
+local SlotDropdown = MainTab:CreateDropdown({
+    Name = "Select Slot",
+    Options = {"Slot 1", "Slot 2", "Slot 3"},
+    CurrentOption = "Slot 1",
+    Callback = function(Option)
+        currentSlot = tonumber(string.match(Option, "%d+"))
+        StatusLabel:Set("Status: Selected " .. Option)
     end
 })
 
-RecordSection:CreateButton({
-    Name = "💾 Save to Slot "..selectedSlot,
+-- Start Recording
+MainTab:CreateButton({
+    Name = "Start Recording",
     Callback = function()
-        if #currentRecording == 0 then
-            Rayfield:Notify({Title="Error", Content="No recording to save!", Duration=3})
-            return
-        end
-        recordings[selectedSlot] = currentRecording
-        Rayfield:Notify({Title="Saved", Content="Saved to Slot "..selectedSlot, Duration=3})
-    end
-})
-
--- Slot Management
-local SlotSection = MainTab:CreateSection("Slots")
-for i = 1, 3 do
-    SlotSection:CreateButton({
-        Name = "Slot "..i..(recordings[i] and " ✅" or " ❌"),
-        Callback = function()
-            selectedSlot = i
-            StatusLabel:Set("Selected Slot "..i)
-        end
-    })
-end
-
-SlotSection:CreateButton({
-    Name = "🗑 Delete Slot "..selectedSlot,
-    Callback = function()
-        recordings[selectedSlot] = nil
-        Rayfield:Notify({Title="Deleted", Content="Slot "..selectedSlot.." cleared", Duration=3})
-    end
-})
-
--- Playback Section
-local PlaySection = MainTab:CreateSection("Playback")
-PlaySection:CreateToggle({
-    Name = "▶ Play Loop",
-    CurrentValue = false,
-    Callback = function(Value)
-        isPlaying = Value
-        if Value then
-            if not recordings[selectedSlot] then
-                Rayfield:Notify({Title="Error", Content="Slot "..selectedSlot.." is empty!", Duration=3})
-                isPlaying = false
+        if isRecording then return end
+        recordedSlots[currentSlot] = {} -- Clear old recording
+        isRecording = true
+        StatusLabel:Set("Status: Recording Slot " .. currentSlot)
+        
+        local startTime = os.clock()
+        local connection
+        connection = RunService.Heartbeat:Connect(function()
+            if not isRecording then
+                connection:Disconnect()
                 return
             end
-            StatusLabel:Set("Playing Slot "..selectedSlot)
-            local function play()
-                local startTime = os.clock()
-                local index = 1
-                local recording = recordings[selectedSlot]
-                while isPlaying and index <= #recording do
-                    local move = recording[index]
-                    if (os.clock()-startTime)*playSpeed >= move.Timestamp then
-                        RootPart.CFrame = CFrame.new(move.Position)
-                        index += 1
-                    end
-                    task.wait()
+            table.insert(recordedSlots[currentSlot], {
+                Position = RootPart.Position,
+                Timestamp = os.clock() - startTime
+            })
+        end)
+    end
+})
+
+-- Stop Recording
+MainTab:CreateButton({
+    Name = "Stop Recording",
+    Callback = function()
+        isRecording = false
+        StatusLabel:Set("Status: Saved to Slot " .. currentSlot)
+    end
+})
+
+-- Play Recording (Loop)
+MainTab:CreateButton({
+    Name = "Play Recording",
+    Callback = function()
+        if not recordedSlots[currentSlot] or #recordedSlots[currentSlot] == 0 then
+            StatusLabel:Set("Status: No recording in Slot " .. currentSlot)
+            return
+        end
+        
+        if isPlaying then return end
+        isPlaying = true
+        StatusLabel:Set("Status: Playing Slot " .. currentSlot)
+        
+        local function playMovement()
+            local startTime = os.clock()
+            local index = 1
+            
+            while isPlaying and index <= #recordedSlots[currentSlot] do
+                local movement = recordedSlots[currentSlot][index]
+                local currentTime = os.clock() - startTime
+                
+                if currentTime >= movement.Timestamp then
+                    RootPart.CFrame = CFrame.new(movement.Position)
+                    index += 1
                 end
-                if isPlaying then play() end -- Loop
+                
+                RunService.Heartbeat:Wait()
             end
-            play()
+            
+            if isPlaying then -- Loop if still active
+                playMovement()
+            end
+        end
+        
+        playMovement()
+    end
+})
+
+-- Stop Playback
+MainTab:CreateButton({
+    Name = "Stop Playback",
+    Callback = function()
+        isPlaying = false
+        StatusLabel:Set("Status: Stopped")
+    end
+})
+
+-- Delete Current Slot
+MainTab:CreateButton({
+    Name = "Delete Slot",
+    Callback = function()
+        if recordedSlots[currentSlot] then
+            recordedSlots[currentSlot] = nil
+            StatusLabel:Set("Status: Deleted Slot " .. currentSlot)
         else
-            StatusLabel:Set("Stopped")
+            StatusLabel:Set("Status: Slot " .. currentSlot .. " is empty")
         end
     end
 })
 
-PlaySection:CreateSlider({
-    Name = "Playback Speed",
-    Range = {0.5, 3},
-    Increment = 0.1,
-    CurrentValue = 1,
-    Callback = function(Value)
-        playSpeed = Value
-    end
-})
-
--- Player Counter
+-- Update Player Count
 Players.PlayerAdded:Connect(function()
     playerCount = #Players:GetPlayers()
-    PlayerLabel:Set("Players: "..playerCount)
+    PlayerLabel:Set("Players: " .. playerCount)
 end)
 
 Players.PlayerRemoving:Connect(function()
     playerCount = #Players:GetPlayers()
-    PlayerLabel:Set("Players: "..playerCount)
+    PlayerLabel:Set("Players: " .. playerCount)
 end)
 
 Rayfield:Notify({
-    Title = "Ready",
-    Content = "Movement Recorder by @hadzscript",
+    Title = "Movement Recorder Ready",
+    Content = "Record & replay your climbs!",
     Duration = 5,
     Image = "rbxassetid://4483362458"
 })
