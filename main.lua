@@ -1,54 +1,27 @@
 --[[
-    Climb & Jump Tower Script with:
-    - Full Map Auto Climb Loop
-    - Smooth Multi-Point Movement
-    - Raycast Ground Check
-    - Everest Support
-    - Rayfield UI
-    - Anti-Ban Safety Features
-    - Manual World Selector
-    - Auto Hatch (Immortal & Secret Only)
-    - Toggleable Climb & Hatch
-    - Status UI (Wins + Current World)
+    Climb & Jump Tower Script with UI
+    ✅ Auto Climb (Multi-Step)
+    ✅ Auto Hatch (Immortal & Secret Only)
+    ✅ Map Lock Detection (Wins Based)
+    ✅ Rayfield UI with Toggle Controls
+    ✅ Status Display (Wins, Map)
+    ✅ Randomized Anti-Ban Delays
 ]]
 
+--// Services
 local Players = game:GetService("Players")
-local Player = Players.LocalPlayer
-local Character = Player.Character or Player.CharacterAdded:Wait()
-local HRP = Character:WaitForChild("HumanoidRootPart")
 local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local HttpService = game:GetService("HttpService")
 
--- Rayfield UI Setup
-loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
+local Player = Players.LocalPlayer
+local Character = Player.Character or Player.CharacterAdded:Wait()
+local HRP = Character:WaitForChild("HumanoidRootPart")
 
-local Window = Rayfield:CreateWindow({
-    Name = "Climb & Jump Tower [EDU]",
-    LoadingTitle = "Educational Utility",
-    ConfigurationSaving = {
-        Enabled = true,
-        FolderName = "ClimbJump",
-        FileName = "edu_config"
-    }
-})
+--// Dependencies (Rayfield)
+loadstring(game:HttpGet('https://raw.githubusercontent.com/shlexware/Rayfield/main/source'))()
 
-local MainTab = Window:CreateTab("Main", 4483362458)
-local ToggleClimb, ToggleHatch
-local SelectedMap = nil
-
--- Leaderstats / Wins
-local function getWins()
-    local ls = Player:FindFirstChild("leaderstats")
-    if ls then
-        local wins = ls:FindFirstChild("Wins")
-        return wins and wins.Value or 0
-    end
-    return 0
-end
-
--- Maps and Wins Required
+--// World Requirements
 local WorldRequirements = {
     ["Eiffel Tower"] = 0,
     ["Statue of Liberty"] = 10,
@@ -61,13 +34,10 @@ local WorldRequirements = {
     ["Oriental Pearl Tower"] = 2000000,
     ["Tokyo Tower"] = 2000000,
     ["Petronas Towers"] = 10000000,
-    ["Himalayas"] = 50000000
+    ["Himalayas"] = 50000000,
 }
 
-local MapList = {}
-for name, _ in pairs(WorldRequirements) do table.insert(MapList, name) end
-
--- Climb heights for each map (multi-step)
+--// Climb Steps Per Map
 local ClimbSteps = {
     ["Eiffel Tower"] = {200, 400, 600, 800},
     ["Statue of Liberty"] = {300, 600, 900},
@@ -80,111 +50,119 @@ local ClimbSteps = {
     ["Oriental Pearl Tower"] = {900, 1500, 2200},
     ["Tokyo Tower"] = {1000, 1600, 2200},
     ["Petronas Towers"] = {1200, 2000, 2800, 3600},
-    ["Himalayas"] = {2000, 4000, 6000, 8000, 10000}
+    ["Himalayas"] = {2000, 4000, 6000, 8000, 10000},
 }
 
--- Status
-local CurrentStatus = MainTab:CreateParagraph({Title = "Current Status", Content = "Wins: 0\nWorld: None"})
+--// Auto Flags
+local autoClimb = false
+local autoHatch = false
+local selectedMap = "Eiffel Tower"
 
--- UI Controls
-ToggleClimb = MainTab:CreateToggle({
-    Name = "Auto Climb",
-    CurrentValue = true,
-    Callback = function(Value) _G.DoClimb = Value end
-})
+--// Functions
+local function getWins()
+    local stats = Player:FindFirstChild("leaderstats")
+    local wins = stats and stats:FindFirstChild("Wins")
+    return wins and wins.Value or 0
+end
 
-ToggleHatch = MainTab:CreateToggle({
-    Name = "Auto Hatch (Immortal/Secret)",
-    CurrentValue = true,
-    Callback = function(Value) _G.DoHatch = Value end
-})
-
-MainTab:CreateDropdown({
-    Name = "Select World",
-    Options = MapList,
-    CurrentOption = nil,
-    Callback = function(Value)
-        SelectedMap = Value
-    end
-})
-
--- Wait until player touches ground
 local function waitUntilGround()
-    local params = RaycastParams.new()
-    params.FilterDescendantsInstances = {Character}
-    params.FilterType = Enum.RaycastFilterType.Blacklist
+    local rayParams = RaycastParams.new()
+    rayParams.FilterDescendantsInstances = {Character}
+    rayParams.FilterType = Enum.RaycastFilterType.Blacklist
     while true do
-        local result = Workspace:Raycast(HRP.Position, Vector3.new(0, -6, 0), params)
-        if result then break end
-        task.wait(0.2 + math.random())
+        local hit = Workspace:Raycast(HRP.Position, Vector3.new(0, -6, 0), rayParams)
+        if hit then break end
+        task.wait(0.1)
     end
 end
 
--- Climb To Y Position
-local function climbToY(targetY)
-    HRP.CFrame = HRP.CFrame.Position + Vector3.new(0, targetY - HRP.Position.Y, 0)
-    task.wait(0.2 + math.random()*0.3)
+local function safeClimb(height)
+    local pos = HRP.Position
+    local dest = Vector3.new(pos.X, height, pos.Z)
+    HRP.CFrame = CFrame.new(dest)
+    task.wait(math.random(20,40)/100) -- random delay for anti-ban
 end
 
--- Trophy
 local function tryTouchTrophy()
     for _, v in ipairs(Workspace:GetDescendants()) do
         if v:IsA("TouchTransmitter") and v.Parent and v.Parent.Name:lower():find("trophy") then
             firetouchinterest(HRP, v.Parent, 0)
-            task.wait(0.05)
             firetouchinterest(HRP, v.Parent, 1)
         end
     end
 end
 
 local function safeJump()
-    local humanoid = Character:FindFirstChildOfClass("Humanoid")
-    if humanoid then
-        humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-    end
+    local hum = Character:FindFirstChildOfClass("Humanoid")
+    if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
 end
 
--- Pet Hatching
-local function autoHatch()
-    local Eggs = Workspace:FindFirstChild("Eggs")
-    if not Eggs then return end
-    for _, egg in pairs(Eggs:GetChildren()) do
-        local config = egg:FindFirstChild("Settings")
-        if config and config:FindFirstChild("Rarities") then
-            local rarities = config.Rarities:GetChildren()
-            for _, r in pairs(rarities) do
-                local name = r.Name:lower()
-                if name:find("immortal") or name:find("secret") then
-                    ReplicatedStorage:WaitForChild("RemoteFunction"):InvokeServer({["Type"] = "Buy", ["Egg"] = egg.Name, ["Amount"] = 1})
+local function climbLoop()
+    while task.wait(2) do
+        if autoClimb then
+            local wins = getWins()
+            local req = WorldRequirements[selectedMap]
+            if wins >= req then
+                local steps = ClimbSteps[selectedMap]
+                for _, h in ipairs(steps) do
+                    safeClimb(h)
                 end
+                tryTouchTrophy()
+                safeJump()
+                waitUntilGround()
             end
         end
     end
 end
 
--- Main Loop
-spawn(function()
-    while task.wait(2 + math.random()) do
-        local wins = getWins()
-        CurrentStatus:Set({Content = "Wins: " .. wins .. "\nWorld: " .. (SelectedMap or "Auto")})
-
-        -- Hatch
-        if _G.DoHatch then autoHatch() end
-
-        if _G.DoClimb then
-            for mapName, requirement in pairs(WorldRequirements) do
-                if SelectedMap and mapName ~= SelectedMap then continue end
-                if wins >= requirement then
-                    local steps = ClimbSteps[mapName]
-                    if steps then
-                        for _, h in ipairs(steps) do climbToY(h) end
-                        tryTouchTrophy()
-                        task.wait(0.5 + math.random())
-                        safeJump()
-                        waitUntilGround()
-                    end
-                end
+local function autoHatchPets()
+    while task.wait(3) do
+        if autoHatch then
+            local hatchRemote = ReplicatedStorage:FindFirstChild("Hatch")
+            if hatchRemote then
+                hatchRemote:InvokeServer("OpenEgg", {
+                    Amount = 1,
+                    Auto = false,
+                    Rarities = {"Immortal", "Secret"}
+                })
             end
         end
     end
-end)
+end
+
+--// Rayfield UI
+local Window = Rayfield:CreateWindow({
+    Name = "Climb Jump EDU", ConfigurationSaving = {Enabled = false}, IntroEnabled = false
+})
+
+Rayfield:CreateLabel({Name = "Status: Wins/Map", ContentText = function()
+    return "Wins: "..getWins().." | Map: "..selectedMap
+end, Parent = Window})
+
+Rayfield:CreateDropdown({
+    Name = "Select Map",
+    Options = table.keys(WorldRequirements),
+    CurrentOption = selectedMap,
+    Callback = function(opt)
+        selectedMap = opt
+    end,
+    Parent = Window
+})
+
+Rayfield:CreateToggle({
+    Name = "Auto Climb",
+    CurrentValue = false,
+    Callback = function(val) autoClimb = val end,
+    Parent = Window
+})
+
+Rayfield:CreateToggle({
+    Name = "Auto Hatch (Immortal/Secret)",
+    CurrentValue = false,
+    Callback = function(val) autoHatch = val end,
+    Parent = Window
+})
+
+--// Start Threads
+spawn(climbLoop)
+spawn(autoHatchPets)
