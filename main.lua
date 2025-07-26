@@ -1,24 +1,39 @@
 --[[
-    Climb & Jump Tower Script with:
-    - Rayfield UI
-    - Auto Climb w/ Unlock Checks
-    - Auto Hatch (Immortal & Secret)
-    - Status HUD
-    - Anti-Ban: Randomized delay
-]]
-
--- Load Rayfield
-local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
+    Climb & Jump Tower Script (Educational)
+    ✅ Rayfield UI
+    ✅ Auto Climb + Trophy + Jump Loop
+    ✅ World Unlock Checker w/ Colors
+    ✅ Dynamic Map Detection + Display
+    ✅ Full UI Status (Wins, Coins, Current Map)
+    ✅ Real-Time Loading Screen
+    ✅ Anti-Ban Logic
+]]--
 
 local Players = game:GetService("Players")
 local Player = Players.LocalPlayer
 local Character = Player.Character or Player.CharacterAdded:Wait()
 local HRP = Character:WaitForChild("HumanoidRootPart")
-
 local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
--- Win requirements
+-- Rayfield UI
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+-- Loading Screen
+local loadingWindow = Rayfield:CreateWindow({
+    Name = "🌀 Loading Climb & Jump...",
+    LoadingTitle = "Initializing Script...",
+    ConfigurationSaving = {Enabled = false}
+})
+
+Rayfield:Notify({Title="Loading", Content="Fetching your map, wins, coins...", Duration=4})
+
+local wins = 0
+local coins = 0
+local currentMap = "Unknown"
+
 local WorldRequirements = {
     ["Eiffel Tower"] = 0,
     ["Statue of Liberty"] = 10,
@@ -49,29 +64,46 @@ local ClimbSteps = {
     ["Himalayas"] = {2000, 4000, 6000, 8000, 10000}
 }
 
-local AutoClimb = false
-local AutoHatch = false
-local SelectedMap = "Eiffel Tower"
-
-local function getWins()
+local function getStats()
     local stats = Player:FindFirstChild("leaderstats")
-    return stats and stats:FindFirstChild("Wins") and stats.Wins.Value or 0
+    return {
+        wins = stats and stats:FindFirstChild("Wins") and stats.Wins.Value or 0,
+        coins = stats and stats:FindFirstChild("Coins") and stats.Coins.Value or 0
+    }
+end
+
+local function detectCurrentMap()
+    local closestMap = "Unknown"
+    local closestDist = math.huge
+    local x = HRP.Position.X
+
+    for mapName, steps in pairs(ClimbSteps) do
+        for _, y in ipairs(steps) do
+            local pos = Vector3.new(x, y, HRP.Position.Z)
+            local dist = (HRP.Position - pos).Magnitude
+            if dist < closestDist then
+                closestDist = dist
+                closestMap = mapName
+            end
+        end
+    end
+    return closestMap
 end
 
 local function waitUntilGround()
-    local params = RaycastParams.new()
-    params.FilterDescendantsInstances = {Character}
-    params.FilterType = Enum.RaycastFilterType.Blacklist
+    local rayParams = RaycastParams.new()
+    rayParams.FilterDescendantsInstances = {Character}
+    rayParams.FilterType = Enum.RaycastFilterType.Blacklist
     while true do
-        local result = Workspace:Raycast(HRP.Position, Vector3.new(0, -6, 0), params)
-        if result then break end
-        task.wait(0.1)
+        local ray = Workspace:Raycast(HRP.Position, Vector3.new(0, -6, 0), rayParams)
+        if ray then break end
+        task.wait(0.1 + math.random()*0.2)
     end
 end
 
-local function climbToY(y)
-    HRP.CFrame = CFrame.new(HRP.Position.X, y, HRP.Position.Z)
-    task.wait(math.random(15, 35)/100)
+local function climbToY(targetY)
+    HRP.CFrame = CFrame.new(HRP.Position.X, targetY, HRP.Position.Z)
+    task.wait(0.3 + math.random() * 0.4)
 end
 
 local function tryTouchTrophy()
@@ -84,82 +116,85 @@ local function tryTouchTrophy()
 end
 
 local function safeJump()
-    local humanoid = Character:FindFirstChildOfClass("Humanoid")
-    if humanoid then
-        humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-    end
+    local hum = Character:FindFirstChildOfClass("Humanoid")
+    if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
 end
 
--- UI
-local Window = Rayfield:CreateWindow({Name = "Climb & Hatch Script", LoadingTitle = "Tower Autofarm", ConfigurationSaving = {Enabled = false}})
-
-local MainTab = Window:CreateTab("Main")
-
-MainTab:CreateToggle({
-    Name = "Auto Climb",
-    CurrentValue = false,
-    Callback = function(v) AutoClimb = v end
+-- Main UI
+local Window = Rayfield:CreateWindow({
+    Name = "🏔 Climb & Jump Hub",
+    LoadingTitle = "Climb & Jump Hub Ready!",
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = "ClimbJumpScript",
+        FileName = "AutoFarmConfig"
+    }
 })
 
-MainTab:CreateToggle({
-    Name = "Auto Hatch (Immortal & Secret)",
-    CurrentValue = false,
-    Callback = function(v) AutoHatch = v end
-})
+local MainTab = Window:CreateTab("Main", 4483362458)
 
-MainTab:CreateDropdown({
-    Name = "Select Map",
-    Options = table.pack(unpack((function()
-        local t = {}
-        for name in pairs(WorldRequirements) do
-            table.insert(t, name)
-        end
-        return t
-    end)())),
-    CurrentOption = "Eiffel Tower",
-    Callback = function(map)
-        SelectedMap = map
+local SelectedMap = detectCurrentMap() or "Eiffel Tower"
+local AutoClimb = false
+
+local MapDropdown = MainTab:CreateDropdown({
+    Name = "Select Map (🟢 = Unlocked | 🔴 = Locked)",
+    Options = {},
+    CurrentOption = "🟢 " .. SelectedMap,
+    Flag = "SelectedMap",
+    Callback = function(opt)
+        SelectedMap = opt:gsub("🟢 ", ""):gsub("🔴 ", "")
     end
 })
 
-MainTab:CreateParagraph({Title = "Status", Content = "Wins: ...\nMap: ..."})
+MainTab:CreateToggle({
+    Name = "Enable Auto Climb",
+    CurrentValue = false,
+    Callback = function(state)
+        AutoClimb = state
+    end
+})
 
--- Main Loop
+local StatusUI = MainTab:CreateParagraph({
+    Title = "Live Status",
+    Content = "Wins: 0\nCoins: 0\nMap: Unknown",
+    Flag = "StatusParagraph"
+})
+
+-- Live Updater
 spawn(function()
     while task.wait(2) do
-        if AutoClimb then
-            local wins = getWins()
-            local required = WorldRequirements[SelectedMap]
-            if wins >= required then
-                for _, y in ipairs(ClimbSteps[SelectedMap]) do
-                    climbToY(y)
-                end
-                tryTouchTrophy()
-                safeJump()
-                waitUntilGround()
+        local stats = getStats()
+        wins, coins = stats.wins, stats.coins
+        currentMap = detectCurrentMap()
+        StatusUI:Set("Wins: "..wins.."\nCoins: "..coins.."\nMap: "..currentMap)
+
+        local options = {}
+        for name, req in pairs(WorldRequirements) do
+            if wins >= req then
+                table.insert(options, "🟢 "..name)
+            else
+                table.insert(options, "🔴 "..name)
             end
         end
+        MapDropdown:Refresh(options, true)
+        MapDropdown:Set((wins >= (WorldRequirements[currentMap] or math.huge)) and "🟢 "..currentMap or "🔴 "..currentMap)
+        SelectedMap = currentMap
     end
 end)
 
--- Auto Hatch (placeholder)
+-- Auto Climb Loop
 spawn(function()
-    while task.wait(3) do
-        if AutoHatch then
-            print("[AutoHatch]: Simulating Immortal/Secret hatch...")
+    while task.wait(3 + math.random()) do
+        if not AutoClimb then continue end
+        if not ClimbSteps[SelectedMap] then continue end
+        if wins < (WorldRequirements[SelectedMap] or 0) then continue end
+        for _, y in ipairs(ClimbSteps[SelectedMap]) do
+            climbToY(y)
         end
+        tryTouchTrophy()
+        safeJump()
+        waitUntilGround()
     end
 end)
 
--- UI status updater
-spawn(function()
-    while task.wait(1) do
-        local p = MainTab:GetParagraph("Status")
-        if p then
-            p:Set({
-                Title = "Status",
-                Content = "Wins: " .. getWins() .. "\nMap: " .. SelectedMap
-            })
-        end
-    end
-end)
+Rayfield:Notify({Title="Ready", Content="Climb & Jump Loaded Successfully!", Duration=5})
