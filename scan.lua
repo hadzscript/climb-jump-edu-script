@@ -1,13 +1,20 @@
--- Advanced Movement Recorder with Persistent Slots
+-- Fully Fixed Movement Recorder with Luna UI
 -- Credits: @hadzscript
--- UI Library: Luna
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
+local UIS = game:GetService("UserInputService")
 
 -- Load Luna UI
-local Luna = loadstring(game:HttpGet("https://raw.githubusercontent.com/Nebula-Softworks/Luna-Interface-Suite/refs/heads/master/source.lua", true))()
+local success, Luna = pcall(function()
+    return loadstring(game:HttpGet("https://raw.githubusercontent.com/Nebula-Softworks/Luna-Interface-Suite/refs/heads/master/source.lua", true))()
+end)
+
+if not success then
+    warn("Failed to load Luna UI")
+    return
+end
 
 -- Player setup
 local Player = Players.LocalPlayer
@@ -17,7 +24,11 @@ local RootPart = Character:WaitForChild("HumanoidRootPart")
 
 -- Persistent data storage
 local DATA_KEY = "MovementRecorderData"
-local recordedSlots = {}
+local recordedSlots = {
+    [1] = {},
+    [2] = {},
+    [3] = {}
+}
 local currentSlot = 1
 local isRecording = false
 local isPlaying = false
@@ -25,108 +36,43 @@ local playerCount = #Players:GetPlayers()
 
 -- Load saved data
 local function LoadData()
+    if not isfile(DATA_KEY) then return end
+    
     local success, data = pcall(function()
         return HttpService:JSONDecode(readfile(DATA_KEY))
     end)
+    
     if success and type(data) == "table" then
-        recordedSlots = data
-    else
-        recordedSlots = {
-            [1] = {},
-            [2] = {},
-            [3] = {}
-        }
+        for i = 1, 3 do
+            if data[i] then
+                recordedSlots[i] = data[i]
+            end
+        end
     end
 end
 
 -- Save data
 local function SaveData()
-    writefile(DATA_KEY, HttpService:JSONEncode(recordedSlots))
+    pcall(function()
+        writefile(DATA_KEY, HttpService:JSONEncode(recordedSlots))
+    end)
 end
 
 -- Initialize data
-if not isfile(DATA_KEY) then
-    SaveData()
-else
-    LoadData()
-end
+LoadData()
 
 -- Create Luna UI
 local Window = Luna:CreateWindow({
     Name = "Movement Recorder PRO",
     LoadingTitle = "Loading Recorder...",
     LoadingSubtitle = "By @hadzscript",
-    ConfigurationSaving = {
-        Enabled = true,
-        FolderName = "MovementRecorder",
-        FileName = "Settings"
-    }
+    ConfigFolder = "MovementRecorderSettings"
 })
 
-local MainTab = Window:CreateTab("Recorder")
+-- Main Tab
+local MainTab = Window:AddTab("Recorder")
 local StatusLabel = MainTab:AddLabel("Status: Idle")
 local PlayerLabel = MainTab:AddLabel("Players: " .. playerCount)
-
--- Slot Management Tab
-local SlotsTab = Window:CreateTab("Slots")
-
--- Create slot frames
-local slotFrames = {}
-local playButtons = {}
-local deleteButtons = {}
-
-for i = 1, 3 do
-    local slotFrame = SlotsTab:AddFolder("Slot " .. i)
-    slotFrames[i] = slotFrame
-    
-    -- Play button for each slot
-    playButtons[i] = slotFrame:AddButton({
-        Text = "Play Slot " .. i,
-        Callback = function()
-            if isPlaying then return end
-            if not recordedSlots[i] or #recordedSlots[i] == 0 then
-                StatusLabel:Set("Status: No recording in Slot " .. i)
-                return
-            end
-            
-            isPlaying = true
-            StatusLabel:Set("Status: Playing Slot " .. i)
-            
-            local function playMovement()
-                local startTime = os.clock()
-                local index = 1
-                
-                while isPlaying and index <= #recordedSlots[i] do
-                    local movement = recordedSlots[i][index]
-                    local currentTime = os.clock() - startTime
-                    
-                    if currentTime >= movement.Timestamp then
-                        RootPart.CFrame = CFrame.new(movement.Position)
-                        index += 1
-                    end
-                    
-                    RunService.Heartbeat:Wait()
-                end
-                
-                if isPlaying then -- Loop if still active
-                    playMovement()
-                end
-            end
-            
-            playMovement()
-        end
-    })
-    
-    -- Delete button for each slot
-    deleteButtons[i] = slotFrame:AddButton({
-        Text = "Delete Slot " .. i,
-        Callback = function()
-            recordedSlots[i] = {}
-            SaveData()
-            StatusLabel:Set("Status: Deleted Slot " .. i)
-        end
-    })
-end
 
 -- Recording Controls
 MainTab:AddButton({
@@ -142,7 +88,7 @@ MainTab:AddButton({
         connection = RunService.Heartbeat:Connect(function()
             if not isRecording then
                 connection:Disconnect()
-                SaveData() -- Save when recording stops
+                SaveData()
                 return
             end
             table.insert(recordedSlots[currentSlot], {
@@ -170,7 +116,7 @@ MainTab:AddButton({
     end
 })
 
--- Slot selection dropdown
+-- Slot Selection
 MainTab:AddDropdown({
     Text = "Select Slot",
     List = {"Slot 1", "Slot 2", "Slot 3"},
@@ -180,26 +126,80 @@ MainTab:AddDropdown({
     end
 })
 
+-- Slots Tab
+local SlotsTab = Window:AddTab("Slot Management")
+
+-- Create slot controls
+for i = 1, 3 do
+    local slotFolder = SlotsTab:AddFolder("Slot " .. i)
+    
+    slotFolder:AddButton({
+        Text = "Play Slot " .. i,
+        Callback = function()
+            if isPlaying then return end
+            if not recordedSlots[i] or #recordedSlots[i] == 0 then
+                StatusLabel:Set("Status: No recording in Slot " .. i)
+                return
+            end
+            
+            isPlaying = true
+            StatusLabel:Set("Status: Playing Slot " .. i)
+            
+            local function playMovement()
+                local startTime = os.clock()
+                local index = 1
+                
+                while isPlaying and index <= #recordedSlots[i] do
+                    local movement = recordedSlots[i][index]
+                    local currentTime = os.clock() - startTime
+                    
+                    if currentTime >= movement.Timestamp then
+                        RootPart.CFrame = CFrame.new(movement.Position)
+                        index += 1
+                    end
+                    
+                    RunService.Heartbeat:Wait()
+                end
+                
+                if isPlaying then
+                    playMovement() -- Loop
+                end
+            end
+            
+            playMovement()
+        end
+    })
+    
+    slotFolder:AddButton({
+        Text = "Delete Slot " .. i,
+        Callback = function()
+            recordedSlots[i] = {}
+            SaveData()
+            StatusLabel:Set("Status: Deleted Slot " .. i)
+        end
+    })
+    
+    slotFolder:AddLabel("Frames: " .. (#recordedSlots[i] or 0))
+end
+
 -- Player count updater
-Players.PlayerAdded:Connect(function()
+local function updatePlayerCount()
     playerCount = #Players:GetPlayers()
     PlayerLabel:Set("Players: " .. playerCount)
-end)
+end
 
-Players.PlayerRemoving:Connect(function()
-    playerCount = #Players:GetPlayers()
-    PlayerLabel:Set("Players: " .. playerCount)
-end)
+Players.PlayerAdded:Connect(updatePlayerCount)
+Players.PlayerRemoving:Connect(updatePlayerCount)
 
--- Auto-save on game close
-game:BindToClose(function()
-    if isfile(DATA_KEY) then
-        SaveData()
-    end
-end)
+-- Auto-save
+game:BindToClose(SaveData)
 
+-- Initial update
+updatePlayerCount()
+
+-- Display notification
 Luna:Notify({
-    Title = "Movement Recorder Ready",
-    Content = "Recordings persist between games!",
+    Title = "System Ready",
+    Content = "Recordings will persist between games!",
     Duration = 5
 })
