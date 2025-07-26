@@ -1,198 +1,204 @@
--- Ultimate Egg Hatch Automation
--- With Luck Boosting, Multi-Slot Recording, and FPS Display
+-- Advanced Movement Recorder & Looper
+-- With Slot System & Clean UI
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UIS = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+
+local Player = Players.LocalPlayer
+local Character = Player.Character or Player.CharacterAdded:Wait()
+local Humanoid = Character:WaitForChild("Humanoid")
+local RootPart = Character:WaitForChild("HumanoidRootPart")
 
 -- Load Rayfield UI
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
--- Configuration
-local CONFIG = {
-    LuckTypes = {
-        {"Super Luck", 1.5},
-        {"Ultra Luck", 2.0},
-        {"Searat Luck", 3.0},
-        {"Rainbow Luck", 5.0} -- Immortal pet boost
-    },
-    HatchModes = {
-        "Fast Match",
-        "Triple Match", 
-        "Tented Match",
-        "AUTO HATCH",
-        "MULTI HATCH"
-    },
-    RecordSlots = 3 -- Number of save slots
-}
+-- Movement Recording
+local recordings = {} -- Stores all saved recordings
+local currentRecording = {}
+local isRecording = false
+local isPlaying = false
+local playSpeed = 1 -- Default speed
+local selectedSlot = 1 -- Currently selected slot
 
--- State Variables
-local currentLuck = 1.0
-local currentHatchMode = "AUTO HATCH"
-local recordedSlots = {}
-local activeSlot = 1
-local isHatching = false
-local fps = 0
+-- Player Count
+local playerCount = #Players:GetPlayers()
 
--- FPS Counter
-local function updateFPS()
-    local frames = 0
-    local lastTick = os.clock()
-    
-    while task.wait(0.5) do
-        local currentTick = os.clock()
-        fps = math.floor(frames / (currentTick - lastTick))
-        frames = 0
-        lastTick = currentTick
-    end
-end
-
-coroutine.wrap(updateFPS)()
-
--- Create Main Window
+-- Create UI
 local Window = Rayfield:CreateWindow({
-    Name = "Egg Hatch PRO",
-    LoadingTitle = "Loading Immortal Pet System",
-    LoadingSubtitle = "With Rainbow Luck Boost",
+    Name = "Movement Recorder PRO",
+    LoadingTitle = "Loading Recorder...",
+    LoadingSubtitle = "By YourName",
     ConfigurationSaving = {
         Enabled = true,
-        FolderName = "EggHatchPRO",
-        FileName = "MultiSlotConfig"
+        FolderName = "MovementRecorder",
+        FileName = "Settings"
     }
 })
 
--- Main Tab
-local MainTab = Window:CreateTab("Controls", 6034287125) -- Egg icon
-local FPSLabel = MainTab:CreateLabel("FPS: "..fps)
+local MainTab = Window:CreateTab("Recorder", 4483362458)
+local StatusLabel = MainTab:CreateLabel("Status: Idle")
+local PlayerLabel = MainTab:CreateLabel("Players: " .. playerCount)
 
--- Luck Selection (Single Row)
-local LuckDropdown = MainTab:CreateDropdown({
-    Name = "Luck Boost",
-    Options = {"Super Luck", "Ultra Luck", "Searat Luck", "Rainbow Luck (Immortal)"},
-    CurrentOption = "Super Luck",
-    Callback = function(Option)
-        for _, luck in pairs(CONFIG.LuckTypes) do
-            if luck[1] == Option then
-                currentLuck = luck[2]
-                break
+-- Recording Controls (Single Row)
+local ControlRow = MainTab:CreateSection("Controls", true)
+
+ControlRow:CreateButton({
+    Name = "▶️ Record",
+    Callback = function()
+        if isRecording then return end
+        currentRecording = {}
+        isRecording = true
+        StatusLabel:Set("Status: Recording...")
+        
+        local startTime = os.clock()
+        local connection
+        connection = RunService.Heartbeat:Connect(function()
+            if not isRecording then
+                connection:Disconnect()
+                return
+            end
+            table.insert(currentRecording, {
+                Position = RootPart.Position,
+                Timestamp = os.clock() - startTime
+            })
+        end)
+    end
+})
+
+ControlRow:CreateButton({
+    Name = "⏹ Stop",
+    Callback = function()
+        if not isRecording then return end
+        isRecording = false
+        StatusLabel:Set("Status: Recorded (" .. #currentRecording .. " frames)")
+    end
+})
+
+ControlRow:CreateButton({
+    Name = "💾 Save to Slot",
+    Callback = function()
+        if #currentRecording == 0 then
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "No recording to save!",
+                Duration = 3
+            })
+            return
+        end
+        recordings[selectedSlot] = currentRecording
+        Rayfield:Notify({
+            Title = "Saved",
+            Content = "Recording saved to Slot " .. selectedSlot,
+            Duration = 3
+        })
+    end
+})
+
+-- Playback Controls
+local PlaybackRow = MainTab:CreateSection("Playback", true)
+
+PlaybackRow:CreateButton({
+    Name = "🔁 Play (Loop)",
+    Callback = function()
+        if not recordings[selectedSlot] then
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "No recording in Slot " .. selectedSlot,
+                Duration = 3
+            })
+            return
+        end
+        
+        if isPlaying then return end
+        isPlaying = true
+        StatusLabel:Set("Status: Playing Slot " .. selectedSlot)
+        
+        local function playLoop()
+            local startTime = os.clock()
+            local index = 1
+            local recording = recordings[selectedSlot]
+            
+            while isPlaying and index <= #recording do
+                local movement = recording[index]
+                local currentTime = (os.clock() - startTime) * playSpeed
+                
+                if currentTime >= movement.Timestamp then
+                    RootPart.CFrame = CFrame.new(movement.Position)
+                    index += 1
+                end
+                RunService.Heartbeat:Wait()
+            end
+            
+            if isPlaying then -- Loop
+                playLoop()
             end
         end
+        
+        playLoop()
     end
 })
 
--- Hatch Mode (Single Row)
-MainTab:CreateDropdown({
-    Name = "Hatch Mode",
-    Options = CONFIG.HatchModes,
-    CurrentOption = "AUTO HATCH",
-    Callback = function(Option)
-        currentHatchMode = Option
+PlaybackRow:CreateButton({
+    Name = "⏹ Stop Playback",
+    Callback = function()
+        isPlaying = false
+        StatusLabel:Set("Status: Stopped")
     end
 })
 
--- Recording System
-local RecordTab = Window:CreateTab("Recording", 6034233233)
-local StatusLabel = RecordTab:CreateLabel("Status: Ready")
+-- Slot Management
+local SlotRow = MainTab:CreateSection("Slots", true)
 
--- Create recording slots
-for i = 1, CONFIG.RecordSlots do
-    RecordTab:CreateButton({
-        Name = "Slot "..i.." (Empty)",
+for i = 1, 3 do -- 3 slots by default (expandable)
+    SlotRow:CreateButton({
+        Name = "Slot " .. i,
         Callback = function()
-            activeSlot = i
-            StatusLabel:Set("Selected Slot "..i)
+            selectedSlot = i
+            StatusLabel:Set("Status: Selected Slot " .. i)
         end
     })
 end
 
--- Record/Play Controls
-RecordTab:CreateToggle({
-    Name = "Record Movements",
-    CurrentValue = false,
-    Callback = function(Value)
-        if Value then
-            recordedSlots[activeSlot] = {}
-            local startTime = os.clock()
-            
-            local connection
-            connection = RunService.Heartbeat:Connect(function()
-                table.insert(recordedSlots[activeSlot], {
-                    Position = game:GetService("Players").LocalPlayer.Character.HumanoidRootPart.Position,
-                    Time = os.clock() - startTime
-                })
-            end)
-            
-            StatusLabel:Set("Recording Slot "..activeSlot)
-        else
-            StatusLabel:Set("Saved to Slot "..activeSlot)
-            -- Update button text
-            for _, element in pairs(RecordTab:GetChildren()) do
-                if element.Name and element.Name:find("Slot "..activeSlot) then
-                    element:Set("Slot "..activeSlot.." ("..#recordedSlots[activeSlot].." steps)")
-                end
-            end
-        end
+SlotRow:CreateButton({
+    Name = "🗑 Delete Slot",
+    Callback = function()
+        if not recordings[selectedSlot] then return end
+        recordings[selectedSlot] = nil
+        Rayfield:Notify({
+            Title = "Deleted",
+            Content = "Slot " .. selectedSlot .. " cleared!",
+            Duration = 3
+        })
     end
 })
 
-RecordTab:CreateToggle({
-    Name = "Play Recording (Loop)",
-    CurrentValue = false,
-    Callback = function(Value)
-        if Value and recordedSlots[activeSlot] then
-            StatusLabel:Set("Playing Slot "..activeSlot)
-            
-            while Value and recordedSlots[activeSlot] do
-                local startTime = os.clock()
-                
-                for _, point in ipairs(recordedSlots[activeSlot]) do
-                    if not Value then break end
-                    
-                    local elapsed = os.clock() - startTime
-                    local waitTime = point.Time - elapsed
-                    
-                    if waitTime > 0 then
-                        task.wait(waitTime)
-                    end
-                    
-                    game:GetService("Players").LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(point.Position)
-                end
-                
-                task.wait(0.5) -- Small delay between loops
-            end
-        else
-            StatusLabel:Set("Stopped Playback")
-        end
+-- Playback Speed
+MainTab:CreateSlider({
+    Name = "Playback Speed",
+    Range = {0.5, 3}, -- 0.5x to 3x
+    Increment = 0.1,
+    CurrentValue = 1,
+    Callback = function(value)
+        playSpeed = value
     end
 })
 
--- Hatch Automation
-local HatchTab = Window:CreateTab("Hatching", 6034233233)
-HatchTab:CreateToggle({
-    Name = "Auto Hatch",
-    CurrentValue = false,
-    Callback = function(Value)
-        isHatching = Value
-        if Value then
-            coroutine.wrap(function()
-                while isHatching do
-                    -- Replace with your game's hatch function
-                    game:GetService("ReplicatedStorage").Events.HatchEgg:FireServer(currentHatchMode, currentLuck)
-                    task.wait(0.5 * (1/currentLuck)) -- Faster with better luck
-                end
-            end)()
-        end
-    end
-})
+-- Update Player Count
+Players.PlayerAdded:Connect(function()
+    playerCount = #Players:GetPlayers()
+    PlayerLabel:Set("Players: " .. playerCount)
+end)
 
--- FPS Updater
-RunService.Heartbeat:Connect(function()
-    FPSLabel:Set("FPS: "..fps)
+Players.PlayerRemoving:Connect(function()
+    playerCount = #Players:GetPlayers()
+    PlayerLabel:Set("Players: " .. playerCount)
 end)
 
 Rayfield:Notify({
-    Title = "System Ready",
-    Content = "Rainbow Luck Boost Active!",
+    Title = "Recorder Ready",
+    Content = "Record, save & loop movements!",
     Duration = 5,
-    Image = "rbxassetid://6034287125"
+    Image = "rbxassetid://4483362458"
 })
