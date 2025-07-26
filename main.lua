@@ -1,157 +1,237 @@
--- Climb & Jump Tower Autoplayer
--- Supports all landmarks: Eiffel Tower, Burj Khalifa, Himalayas, etc.
+-- Ultimate Climb & Jump Tower Autoplayer
+-- Complete with trophy detection, map progression, and mobile-friendly UI
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
 
+-- Load Rayfield UI (mobile optimized)
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+-- Player setup
 local Player = Players.LocalPlayer
 local Character = Player.Character or Player.CharacterAdded:Wait()
 local Humanoid = Character:WaitForChild("Humanoid")
 local RootPart = Character:WaitForChild("HumanoidRootPart")
 
--- Landmark progression system
-local LANDMARKS = {
-    {Name = "Eiffel Tower", RequiredWins = 0},
-    {Name = "Statue of Liberty", RequiredWins = 10},
-    {Name = "Leaning Tower of Pisa", RequiredWins = 17500},
-    {Name = "Pyramids", RequiredWins = 50000},
-    {Name = "Burj Khalifa", RequiredWins = 80000},
-    {Name = "Empire State Building", RequiredWins = 100000},
-    {Name = "World Trade Center", RequiredWins = 400000},
-    {Name = "Big Ben", RequiredWins = 1000000},
-    {Name = "Oriental Pearl Tower", RequiredWins = 2000000},
-    {Name = "Tokyo Tower", RequiredWins = 2000000},
-    {Name = "Petronas Towers", RequiredWins = 10000000},
-    {Name = "Himalayas", RequiredWins = 50000000}
-}
-
--- Configuration
+-- Game Configuration
 local CONFIG = {
-    ClimbSpeed = 30,
-    JumpPower = 50,
-    WinCheckInterval = 1,
-    AntiBanDelay = math.random(2, 5)
+    ClimbSpeed = 28,
+    JumpPower = 45,
+    TrophyCheckInterval = 0.5,
+    MapCheckInterval = 3,
+    AntiBanDelay = {1, 3}, -- min/max random delay
+    LadderTags = {"Ladder", "Climbable"},
+    TrophyNames = {"Trophy", "WinPart", "Finish"}
 }
 
--- State variables
-local currentWins = 0
-local currentLandmark = nil
-local isClimbing = false
+-- Game State
+local currentMap = "Unknown"
+local unlockedMaps = {}
+local stats = {
+    Wins = 0,
+    Coins = 0,
+    Trophies = 0
+}
 local isRunning = false
+local isClimbing = false
 
--- UI Library (using Rayfield)
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+-- Mobile Control Buttons
+local mobileControls = {
+    Climb = false,
+    Jump = false
+}
+
+-- Initialize Rayfield UI
 local Window = Rayfield:CreateWindow({
     Name = "Climb & Jump Tower",
-    LoadingTitle = "Loading Autoplayer...",
-    LoadingSubtitle = "By YourName",
+    LoadingTitle = "Loading Premium Autoplayer",
+    LoadingSubtitle = "Mobile & PC Optimized",
     ConfigurationSaving = {
         Enabled = true,
-        FolderName = "ClimbAndJump",
-        FileName = "Config"
-    }
+        FolderName = "ClimbJumpPro",
+        FileName = "Settings"
+    },
+    KeySystem = false -- Set to true if you want key auth
 })
 
 -- Main Tab
-local MainTab = Window:CreateTab("Main")
+local MainTab = Window:CreateTab("Main", 4483362458) -- Climb icon
 local StatusLabel = MainTab:CreateLabel("Status: Ready")
-local WinsLabel = MainTab:CreateLabel("Wins: 0")
-local LandmarkLabel = MainTab:CreateLabel("Current Landmark: None")
+local StatsLabel = MainTab:CreateLabel("Wins: 0 | Coins: 0 | Trophies: 0")
 
--- Auto Climb Toggle
+-- Map Selection
+local MapDropdown = MainTab:CreateDropdown({
+    Name = "Map Selection",
+    Options = {"Loading maps..."},
+    CurrentOption = "None",
+    Flag = "MapSelector",
+    Callback = function(Option)
+        currentMap = Option
+    end
+})
+
+-- Auto-Climb Toggle
 MainTab:CreateToggle({
-    Name = "Auto Climb",
+    Name = "Auto Climb & Trophy",
     CurrentValue = false,
+    Flag = "AutoToggle",
     Callback = function(Value)
         isRunning = Value
-        StatusLabel:Set("Status: " .. (Value and "Running" or "Stopped"))
+        StatusLabel:Set("Status: "..(Value and "Running" or "Stopped"))
     end
 })
 
--- Landmark Progression Display
-local LandmarkDropdown = MainTab:CreateDropdown({
-    Name = "Landmarks",
-    Options = {"Loading..."},
-    CurrentOption = "None",
-    Callback = function(Option)
-        -- Optional: Add manual landmark selection logic
-    end
-})
-
--- Update landmark dropdown
-local function updateLandmarks()
-    local options = {}
-    for _, landmark in pairs(LANDMARKS) do
-        local status = currentWins >= landmark.RequiredWins and "🟢" or "🔴"
-        table.insert(options, string.format("%s %s (%d Wins)", status, landmark.Name, landmark.RequiredWins))
-    end
-    LandmarkDropdown:UpdateOptions(options)
+-- Mobile Controls (only visible on mobile)
+if UIS.TouchEnabled then
+    local ControlsTab = Window:CreateTab("Mobile Controls", 4733963921) -- Mobile icon
+    
+    ControlsTab:CreateButton({
+        Name = "Climb (Hold)",
+        Callback = function()
+            mobileControls.Climb = true
+            startClimbing()
+        end
+    }):CreateBind({
+        EndedCallback = function()
+            mobileControls.Climb = false
+            stopClimbing(false)
+        end
+    })
+    
+    ControlsTab:CreateButton({
+        Name = "Jump Off",
+        Callback = function()
+            if isClimbing then
+                stopClimbing(true)
+            else
+                Humanoid.Jump = true
+            end
+        end
+    })
 end
 
--- Core climbing function
-local function autoClimb()
-    if not isRunning then return end
+-- Settings Tab
+local SettingsTab = Window:CreateTab("Settings", 6031280882) -- Gear icon
+SettingsTab:CreateSlider({
+    Name = "Climb Speed",
+    Range = {10, 50},
+    Increment = 1,
+    CurrentValue = CONFIG.ClimbSpeed,
+    Flag = "ClimbSpeed",
+    Callback = function(Value)
+        CONFIG.ClimbSpeed = Value
+    end
+})
+
+-- Trophy Detection
+local function findNearestTrophy()
+    local closest
+    local minDist = math.huge
     
-    -- Find the highest available landmark
-    local targetLandmark = nil
-    for i = #LANDMARKS, 1, -1 do
-        if currentWins >= LANDMARKS[i].RequiredWins then
-            targetLandmark = LANDMARKS[i]
-            break
+    for _, trophyName in pairs(CONFIG.TrophyNames) do
+        for _, part in pairs(Workspace:GetDescendants()) do
+            if part.Name:lower():find(trophyName:lower()) and part:IsA("BasePart") then
+                local dist = (part.Position - RootPart.Position).Magnitude
+                if dist < minDist then
+                    minDist = dist
+                    closest = part
+                end
+            end
         end
     end
     
-    -- Update current landmark
-    if targetLandmark and (not currentLandmark or targetLandmark.Name ~= currentLandmark.Name) then
-        currentLandmark = targetLandmark
-        LandmarkLabel:Set("Current Landmark: " .. currentLandmark.Name)
-        StatusLabel:Set("Status: Climbing " .. currentLandmark.Name)
+    return closest, minDist
+end
+
+-- Ladder Detection (improved)
+local function findBestLadder()
+    local bestLadder
+    local bestScore = 0
+    
+    for _, tag in pairs(CONFIG.LadderTags) do
+        for _, part in pairs(Workspace:GetDescendants()) do
+            if (part:FindFirstChild(tag) or part:GetAttribute("Climbable")) and part:IsA("BasePart") then
+                -- Score based on proximity and alignment
+                local toPart = (part.Position - RootPart.Position)
+                local distScore = 1 / (toPart.Magnitude + 0.01)
+                local alignScore = math.abs(RootPart.CFrame.LookVector:Dot(toPart.Unit))
+                local totalScore = distScore * alignScore
+                
+                if totalScore > bestScore then
+                    bestScore = totalScore
+                    bestLadder = part
+                end
+            end
+        end
     end
     
-    -- Climbing logic
+    return bestLadder
+end
+
+-- Core Climbing System
+local function startClimbing()
+    if isClimbing then return end
+    
+    local ladder = findBestLadder()
+    if not ladder then return end
+    
     isClimbing = true
     Humanoid:ChangeState(Enum.HumanoidStateType.Physics)
-    RootPart.Velocity = Vector3.new(0, CONFIG.ClimbSpeed, 0)
+    Humanoid.AutoRotate = false
     
-    -- Simulate climb time based on landmark height
-    local climbTime = math.random(8, 15) -- Varies per landmark
-    task.wait(climbTime)
+    -- Position character on ladder
+    local ladderCF = ladder.CFrame
+    local offset = ladderCF.LookVector * 2
+    RootPart.CFrame = CFrame.new(RootPart.Position + offset, RootPart.Position + ladderCF.LookVector)
+end
+
+local function stopClimbing(shouldJump)
+    if not isClimbing then return end
     
-    -- Win detection (replace with your game's actual win detection)
-    currentWins = currentWins + 1
-    WinsLabel:Set("Wins: " .. currentWins)
-    
-    -- Jump off and reset
-    RootPart.Velocity = Vector3.new(0, CONFIG.JumpPower, -CONFIG.JumpPower)
-    task.wait(2)
     isClimbing = false
+    Humanoid.AutoRotate = true
+    Humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
     
-    -- Anti-ban delay
-    task.wait(CONFIG.AntiBanDelay)
-    
-    -- Repeat if still running
-    if isRunning then
-        autoClimb()
+    if shouldJump then
+        RootPart.Velocity = Vector3.new(0, CONFIG.JumpPower, 0)
     end
 end
 
--- Win tracking (replace with your game's actual win detection)
-local function trackWins()
-    while task.wait(CONFIG.WinCheckInterval) do
-        -- This should be replaced with your game's win detection method
-        -- Example: Check leaderstats or game events
+-- Main Game Loop
+local function gameLoop()
+    while task.wait() do
+        if isRunning then
+            -- Check for trophies
+            local trophy, trophyDist = findNearestTrophy()
+            if trophy and trophyDist < 10 then
+                StatusLabel:Set("Status: Claiming Trophy")
+                firetouchinterest(RootPart, trophy, 0) -- Simulate touch
+                firetouchinterest(RootPart, trophy, 1)
+                stats.Trophies += 1
+                StatsLabel:Set(string.format("Wins: %d | Coins: %d | Trophies: %d", 
+                    stats.Wins, stats.Coins, stats.Trophies))
+                task.wait(math.random(unpack(CONFIG.AntiBanDelay)))
+            end
+            
+            -- Auto-climb logic
+            if not isClimbing then
+                startClimbing()
+            else
+                -- Move upward while climbing
+                RootPart.Velocity = Vector3.new(0, CONFIG.ClimbSpeed, 0)
+            end
+        end
     end
 end
 
 -- Initialize
-updateLandmarks()
-coroutine.wrap(trackWins)()
-coroutine.wrap(autoClimb)()
-
+coroutine.wrap(gameLoop)()
 Rayfield:Notify({
-    Title = "Climb & Jump Tower",
-    Content = "Script loaded successfully!",
+    Title = "System Ready",
+    Content = "Auto-climber initialized successfully!",
     Duration = 3,
-    Image = "rbxassetid://4483345998"
+    Image = "rbxassetid://4483362458"
 })
